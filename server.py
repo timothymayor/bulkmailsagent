@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import bulkmail as bm
+import report
 
 PORT = int(os.environ.get("BULKMAIL_PORT", "8025"))
 STATIC = bm.HERE / "web"
@@ -80,7 +81,7 @@ def run_job(opts: dict) -> None:
         if live:
             mailer = bm.Mailer()
             mailer.connect()  # fail fast on bad credentials
-        rate = float(opts.get("rate") or bm.env("SEND_RATE_PER_MIN", "20"))
+        rate = float(opts.get("rate") or bm.env("SEND_RATE_PER_MIN", "200"))
         interval = 60.0 / rate if rate > 0 else 0
         for i, row in enumerate(queue, 1):
             if JOB.stop.is_set():
@@ -137,7 +138,11 @@ def write_settings(new: dict) -> None:
         if k in SECRET_KEYS and (v == "" or set(v) == {"•"}):
             continue  # blank or masked = keep existing secret
         current[k] = v
-    lines = [f"{k}={current[k]}" for k in SETTING_KEYS]
+    def quote(v: str) -> str:
+        # Quote values with $, #, spaces etc. so other .env readers (e.g. VS Code) keep them literal.
+        return f"'{v}'" if v and "'" not in v and any(c in v for c in "$#\"` ") else v
+
+    lines = [f"{k}={quote(current[k])}" for k in SETTING_KEYS]
     ENV_FILE.write_text("# Written by the bulk email web UI\n" + "\n".join(lines) + "\n",
                         encoding="utf-8")
     os.environ.update(current)
@@ -151,7 +156,7 @@ def status() -> dict:
         "sender": bm.env("SENDER_EMAIL") or bm.env("SMTP_USER"),
         "sender_name": bm.env("SENDER_NAME"),
         "unsubscribe": bm.env("UNSUBSCRIBE"),
-        "rate": float(bm.env("SEND_RATE_PER_MIN", "20") or 20),
+        "rate": float(bm.env("SEND_RATE_PER_MIN", "200") or 200),
     }
 
 
@@ -205,8 +210,12 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if not path.startswith("/api/"):
             return super().do_GET()
-        campaign = parse_qs(urlparse(self.path).query).get("campaign", [""])[0] or "campaign"
+        query = parse_qs(urlparse(self.path).query)
+        if path == "/api/report":
+            return self.send_report(query)
+        campaign = query.get("campaign", [""])[0] or "campaign"
         routes = {
+            "/api/campaigns": lambda: report.campaign_names(),
             "/api/status": lambda: status(),
             "/api/settings": lambda: read_settings(),
             "/api/recipients": lambda: recipients_summary(campaign),
@@ -236,6 +245,25 @@ class Handler(SimpleHTTPRequestHandler):
             self.error(str(e))
         except Exception as e:
             self.error(f"{e.__class__.__name__}: {e}", HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def send_report(self, query):
+        fmt = query.get("format", ["pdf"])[0]
+        campaign = query.get("campaign", [""])[0] or None
+        try:
+            data, name = report.build(fmt, campaign)
+        except ValueError as e:
+            return self.error(str(e))
+        except Exception as e:
+            return self.error(f"Could not build the report: {e}", HTTPStatus.INTERNAL_SERVER_ERROR)
+        types = {"pdf": "application/pdf",
+                 "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", types[fmt])
+        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     def post_recipients(self, data):
         global RECIPIENTS

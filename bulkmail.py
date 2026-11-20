@@ -203,7 +203,12 @@ def build_message(sender_name: str, sender_email: str, to: str, subject: str,
         msg["List-Unsubscribe"] = f"<{target}>"
         if target.startswith("http"):
             msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
-        body = f"{body.rstrip()}\n\n--\nTo stop receiving these emails: {target.removeprefix('mailto:')}"
+        if target.startswith("mailto:"):
+            address = target.removeprefix("mailto:").split("?")[0]
+            how = f'email {address} with the subject "unsubscribe"'
+        else:
+            how = f"visit {target}"
+        body = f"{body.rstrip()}\n\n--\nTo stop receiving these emails, {how}."
     msg.set_content(body)
     return msg
 
@@ -256,7 +261,7 @@ def main() -> None:
     p.add_argument("--send", action="store_true", help="Actually send (default is a dry run)")
     p.add_argument("--personalize", action="store_true", help="Have Claude tailor each email")
     p.add_argument("--campaign", help="Campaign name for resume tracking (default: template filename)")
-    p.add_argument("--rate", type=float, default=float(env("SEND_RATE_PER_MIN", "20")),
+    p.add_argument("--rate", type=float, default=float(env("SEND_RATE_PER_MIN", "200")),
                    help="Max emails per minute (default 20)")
     p.add_argument("--limit", type=int, help="Only process the first N eligible recipients")
     p.add_argument("--test-to", help="Send every message to this address instead (for testing)")

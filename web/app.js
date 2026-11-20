@@ -251,7 +251,7 @@ function renderSendSummary() {
   const ready = readyRows().length;
   const limit = parseInt($("#limit").value, 10) || ready;
   const count = Math.min(limit, ready);
-  const rate = parseFloat($("#rate").value) || state.status?.rate || 20;
+  const rate = parseFloat($("#rate").value) || state.status?.rate || 200;
   const minutes = count / rate;
   const s = state.status || {};
   const problems = [];
@@ -354,8 +354,26 @@ function renderJob() {
 
 // ---------------------------------------------------------------- history / suppression / settings
 
+function updateReportLinks() {
+  const c = $("#report-campaign").value;
+  const q = c ? `&campaign=${encodeURIComponent(c)}` : "";
+  $("#report-pdf").href = `/api/report?format=pdf${q}`;
+  $("#report-docx").href = `/api/report?format=docx${q}`;
+}
+
+async function loadCampaigns() {
+  const sel = $("#report-campaign");
+  const current = sel.value;
+  const names = await api("/api/campaigns");
+  sel.innerHTML = `<option value="">All campaigns</option>` +
+    names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  if (names.includes(current)) sel.value = current;
+  updateReportLinks();
+}
+
 async function loadHistory() {
   try {
+    loadCampaigns().catch((e) => toast(e.message, true));
     const rows = await api("/api/history");
     $("#history-table").innerHTML = rows.length
       ? `<thead><tr><th scope="col">When</th><th scope="col">Campaign</th><th scope="col">Email</th><th scope="col">Result</th><th scope="col">Detail</th></tr></thead><tbody>` +
@@ -430,6 +448,7 @@ function init() {
   $("#dry-run").addEventListener("click", () => startRun(false));
   $("#send-btn").addEventListener("click", () => startRun(true));
   $("#stop-btn").addEventListener("click", () => api("/api/job/stop", {}).catch((e) => toast(e.message, true)));
+  $("#report-campaign").addEventListener("change", updateReportLinks);
   $("#save-suppression").addEventListener("click", saveSuppression);
   $("#settings-form").addEventListener("submit", saveSettings);
 

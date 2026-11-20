@@ -166,6 +166,15 @@
       <section class="view" id="view-history" hidden>
         <h1>Sent log</h1>
         <p class="lede">Every delivery and failure from real sends, newest first. Test sends aren't recorded. A campaign never emails an address twice.</p>
+        <div class="report-bar">
+          <label class="field inline"><span>Report for</span>
+            <select id="report-campaign"><option value="">All campaigns</option></select>
+          </label>
+          <div class="row-actions">
+            <a class="btn" id="report-pdf" href="/api/report?format=pdf" download>Download PDF</a>
+            <a class="btn" id="report-docx" href="/api/report?format=docx" download>Download Word (.docx)</a>
+          </div>
+        </div>
         <div class="table-wrap"><table class="grid" id="history-table"></table></div>
       </section>
 
@@ -195,7 +204,7 @@
             <label class="field"><span>From address</span><input name="SENDER_EMAIL" type="email" placeholder="Defaults to the username"></label>
             <label class="field"><span>Replies go to</span><input name="REPLY_TO" type="email" placeholder="Optional"></label>
             <label class="field"><span>Unsubscribe link or address</span><input name="UNSUBSCRIBE" placeholder="mailto:you@example.com?subject=unsubscribe"></label>
-            <label class="field"><span>Default emails per minute</span><input name="SEND_RATE_PER_MIN" inputmode="numeric" placeholder="20"></label>
+            <label class="field"><span>Default emails per minute</span><input name="SEND_RATE_PER_MIN" inputmode="numeric" placeholder="200"></label>
           </fieldset>
           <fieldset>
             <legend>Claude</legend>

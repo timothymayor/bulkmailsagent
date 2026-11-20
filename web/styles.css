@@ -124,6 +124,10 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--f
 .icon-btn:not(:disabled):hover { border-color: var(--ink); }
 .icon-btn:disabled { opacity: .35; cursor: default; }
 .row-actions { display: flex; gap: .75rem; margin-top: 1rem; flex-wrap: wrap; }
+.report-bar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: .75rem 1.5rem; margin-bottom: 1.25rem; }
+.report-bar .field.inline { margin: 0; }
+.report-bar .row-actions { margin-top: 0; }
+a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .next { margin-top: 1.5rem; }
 
 /* ---------- recipients ---------- */
