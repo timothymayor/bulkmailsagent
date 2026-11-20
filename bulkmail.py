@@ -48,7 +48,12 @@ def load_dotenv(path: Path = HERE / ".env") -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        value = value.strip()
+        # Remove one matching pair of surrounding quotes only, so a password that
+        # merely starts or ends with a quote character survives intact.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        os.environ.setdefault(key.strip(), value)
 
 
 def env(name: str, default: str | None = None, required: bool = False) -> str:
@@ -56,6 +61,19 @@ def env(name: str, default: str | None = None, required: bool = False) -> str:
     if required and not value:
         sys.exit(f"Missing required setting {name} (set it in .env)")
     return value or ""
+
+
+# Conservative default: many hosts throttle or block accounts that send faster.
+DEFAULT_RATE = 20.0
+
+
+def rate_setting() -> float:
+    """SEND_RATE_PER_MIN as a number, falling back to DEFAULT_RATE if unset or invalid."""
+    try:
+        rate = float(env("SEND_RATE_PER_MIN") or DEFAULT_RATE)
+    except ValueError:
+        return DEFAULT_RATE
+    return rate if rate > 0 else DEFAULT_RATE
 
 
 # ---------------------------------------------------------------- inputs
@@ -261,8 +279,8 @@ def main() -> None:
     p.add_argument("--send", action="store_true", help="Actually send (default is a dry run)")
     p.add_argument("--personalize", action="store_true", help="Have Claude tailor each email")
     p.add_argument("--campaign", help="Campaign name for resume tracking (default: template filename)")
-    p.add_argument("--rate", type=float, default=float(env("SEND_RATE_PER_MIN", "200")),
-                   help="Max emails per minute (default 20)")
+    p.add_argument("--rate", type=float, default=rate_setting(),
+                   help=f"Max emails per minute (default: SEND_RATE_PER_MIN, else {DEFAULT_RATE:g})")
     p.add_argument("--limit", type=int, help="Only process the first N eligible recipients")
     p.add_argument("--test-to", help="Send every message to this address instead (for testing)")
     p.add_argument("--model", default=env("CLAUDE_MODEL", "claude-opus-5-5"))

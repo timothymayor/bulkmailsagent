@@ -1,6 +1,7 @@
 """Campaign reports as downloadable PDF or Word (.docx) files.
 
-Built from sent_log.csv, the same log the sender writes. Test sends
+Built from sent_log.csv, the same log the sender writes. "Sent" means the mail
+server accepted the message; it does not confirm it reached the inbox. Test sends
 (--test-to) are never logged, so they never appear in a report.
 
 Usage:
@@ -103,7 +104,7 @@ def summary_rows(campaigns: list[Campaign]) -> list[list[str]]:
              str(len(c.sent)), str(len(c.failed)), f"{c.rate:.1f}%"] for c in campaigns]
 
 
-SUMMARY_HEAD = ["Campaign", "First send", "Last send", "Recipients", "Delivered", "Failed", "Success"]
+SUMMARY_HEAD = ["Campaign", "First send", "Last send", "Recipients", "Sent", "Failed", "Success"]
 
 
 # ---------------------------------------------------------------- Word
@@ -168,7 +169,7 @@ def build_docx(campaigns: list[Campaign], title: str) -> bytes:
         totals = (sum(len(c.results) for c in campaigns), sum(len(c.sent) for c in campaigns),
                   sum(len(c.failed) for c in campaigns))
         doc.add_paragraph(f"{len(campaigns)} campaign(s), {totals[0]} recipient(s): "
-                          f"{totals[1]} delivered, {totals[2]} failed.")
+                          f"{totals[1]} sent, {totals[2]} failed.")
         table(SUMMARY_HEAD, summary_rows(campaigns))
 
         for c in campaigns:
@@ -176,10 +177,10 @@ def build_docx(campaigns: list[Campaign], title: str) -> bytes:
             doc.add_heading(f"Campaign: {c.name}", level=1)
             doc.add_paragraph(
                 f"Sent between {nice_time(c.first)} and {nice_time(c.last)}. "
-                f"{len(c.results)} recipient(s), {len(c.sent)} delivered, {len(c.failed)} failed "
+                f"{len(c.results)} recipient(s), {len(c.sent)} sent, {len(c.failed)} failed "
                 f"({c.rate:.1f}% success, {c.attempts} attempt(s) in total).")
             if c.failed:
-                doc.add_heading("Failed deliveries", level=2)
+                doc.add_heading("Failed sends", level=2)
                 table(["Email", "Time", "Reason"],
                       [[e, nice_time(ts), d or "-"] for e, ts, _, d in c.failed])
             doc.add_heading("All recipients", level=2)
@@ -282,17 +283,17 @@ def build_pdf(campaigns: list[Campaign], title: str) -> bytes:
         totals = (sum(len(c.results) for c in campaigns), sum(len(c.sent) for c in campaigns),
                   sum(len(c.failed) for c in campaigns))
         para(f"{len(campaigns)} campaign(s), {totals[0]} recipient(s): "
-             f"{totals[1]} delivered, {totals[2]} failed.")
+             f"{totals[1]} sent, {totals[2]} failed.")
         table(SUMMARY_HEAD, summary_rows(campaigns), (30, 27, 27, 20, 20, 16, 18))
 
         for c in campaigns:
             pdf.add_page()
             heading(f"Campaign: {c.name}", 15)
             para(f"Sent between {nice_time(c.first)} and {nice_time(c.last)}. "
-                 f"{len(c.results)} recipient(s), {len(c.sent)} delivered, {len(c.failed)} failed "
+                 f"{len(c.results)} recipient(s), {len(c.sent)} sent, {len(c.failed)} failed "
                  f"({c.rate:.1f}% success, {c.attempts} attempt(s) in total).")
             if c.failed:
-                heading("Failed deliveries", 12, 2)
+                heading("Failed sends", 12, 2)
                 table(["Email", "Time", "Reason"],
                       [[e, nice_time(ts), d or "-"] for e, ts, _, d in c.failed], (55, 32, 87))
             heading("All recipients", 12, 2)

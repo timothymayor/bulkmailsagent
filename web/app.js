@@ -178,8 +178,12 @@ function fill(template, row, highlight) {
 function footer() {
   const u = state.status?.unsubscribe;
   if (!u) return "";
-  const target = /^(https?:|mailto:)/.test(u) ? u : `mailto:${u}`;
-  return `\n\n--\nTo stop receiving these emails: ${target.replace(/^mailto:/, "")}`;
+  // Mirrors build_message() in bulkmail.py so the preview matches what is sent.
+  const target = /^(http|mailto:)/.test(u) ? u : `mailto:${u}`;
+  const how = target.startsWith("mailto:")
+    ? `email ${target.slice(7).split("?")[0]} with the subject "unsubscribe"`
+    : `visit ${target}`;
+  return `\n\n--\nTo stop receiving these emails, ${how}.`;
 }
 
 function renderPreview() {
@@ -251,7 +255,7 @@ function renderSendSummary() {
   const ready = readyRows().length;
   const limit = parseInt($("#limit").value, 10) || ready;
   const count = Math.min(limit, ready);
-  const rate = parseFloat($("#rate").value) || state.status?.rate || 200;
+  const rate = parseFloat($("#rate").value) || state.status?.rate || 20;
   const minutes = count / rate;
   const s = state.status || {};
   const problems = [];

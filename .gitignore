@@ -3,3 +3,4 @@ outbox/
 sent_log.csv
 __pycache__/
 reports/
+unsubscribed.txt

@@ -81,7 +81,7 @@ def run_job(opts: dict) -> None:
         if live:
             mailer = bm.Mailer()
             mailer.connect()  # fail fast on bad credentials
-        rate = float(opts.get("rate") or bm.env("SEND_RATE_PER_MIN", "200"))
+        rate = float(opts.get("rate") or bm.rate_setting())
         interval = 60.0 / rate if rate > 0 else 0
         for i, row in enumerate(queue, 1):
             if JOB.stop.is_set():
@@ -135,6 +135,9 @@ def write_settings(new: dict) -> None:
         if k not in new:
             continue
         v = str(new[k]).strip()
+        if "\n" in v or "\r" in v or "\0" in v:
+            # A line break would let one value write extra settings into .env.
+            raise ValueError(f"{k} can't contain line breaks.")
         if k in SECRET_KEYS and (v == "" or set(v) == {"•"}):
             continue  # blank or masked = keep existing secret
         current[k] = v
@@ -156,7 +159,7 @@ def status() -> dict:
         "sender": bm.env("SENDER_EMAIL") or bm.env("SMTP_USER"),
         "sender_name": bm.env("SENDER_NAME"),
         "unsubscribe": bm.env("UNSUBSCRIBE"),
-        "rate": float(bm.env("SEND_RATE_PER_MIN", "200") or 200),
+        "rate": bm.rate_setting(),
     }
 
 
@@ -203,10 +206,17 @@ class Handler(SimpleHTTPRequestHandler):
     def same_origin(self) -> bool:
         origin = self.headers.get("Origin")
         if origin:
-            return urlparse(origin).hostname in ("127.0.0.1", "localhost")
+            return origin in (f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}")
         return True
 
+    # Reject requests addressed to any other host name. This blocks DNS-rebinding,
+    # where a hostile site points its own domain at 127.0.0.1 to read the API.
+    def valid_host(self) -> bool:
+        return self.headers.get("Host", "") in (f"127.0.0.1:{PORT}", f"localhost:{PORT}")
+
     def do_GET(self):
+        if not self.valid_host():
+            return self.error("Unknown host.", HTTPStatus.FORBIDDEN)
         path = urlparse(self.path).path
         if not path.startswith("/api/"):
             return super().do_GET()
@@ -229,7 +239,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if not self.same_origin() or self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+        if not self.valid_host() or not self.same_origin() or self.headers.get("Content-Type", "").split(";")[0] != "application/json":
             return self.error("Requests must come from the app itself.", HTTPStatus.FORBIDDEN)
         try:
             length = int(self.headers.get("Content-Length", 0))
