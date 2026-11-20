@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mailroom</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 22" aria-hidden="true"><rect x="1" y="1" width="30" height="20" rx="2"/><path d="M1.5 2 16 13 30.5 2"/></svg>
+      <span>Mailroom</span>
+    </div>
+    <div class="campaign-field">
+      <label for="campaign">Campaign</label>
+      <input id="campaign" type="text" spellcheck="false" placeholder="e.g. november-launch">
+    </div>
+    <div class="conn" id="conn" aria-live="polite"></div>
+  </header>
+
+  <div class="shell">
+    <nav class="rail" aria-label="Sections">
+      <ol class="steps">
+        <li><a href="#recipients" data-view="recipients"><span class="num">1</span><span class="label">Recipients<small id="nav-recipients">None yet</small></span></a></li>
+        <li><a href="#message" data-view="message"><span class="num">2</span><span class="label">Message<small id="nav-message">Not written</small></span></a></li>
+        <li><a href="#send" data-view="send"><span class="num">3</span><span class="label">Send<small id="nav-send">Nothing sent</small></span></a></li>
+      </ol>
+      <ul class="aux">
+        <li><a href="#history" data-view="history">Sent log</a></li>
+        <li><a href="#unsubscribes" data-view="unsubscribes">Unsubscribes</a></li>
+        <li><a href="#settings" data-view="settings">Settings</a></li>
+      </ul>
+    </nav>
+
+    <main id="main">
+      <!-- 1 Recipients -->
+      <section class="view" id="view-recipients" hidden>
+        <h1>Who is this going to?</h1>
+        <p class="lede">Upload a CSV with an <code>email</code> column. Every other column (name, company, notes) becomes a field you can use in the message.</p>
+
+        <div class="drop" id="drop" tabindex="0" role="button" aria-describedby="drop-hint">
+          <input type="file" id="file" accept=".csv,text/csv" hidden>
+          <strong>Drop a CSV here or choose a file</strong>
+          <span id="drop-hint">You can also paste rows below.</span>
+        </div>
+
+        <details class="paste">
+          <summary>Paste CSV text instead</summary>
+          <textarea id="csv-text" rows="7" spellcheck="false" placeholder="email,name,company&#10;alice@example.com,Alice,Acme Corp"></textarea>
+          <div class="row-actions">
+            <button class="btn" id="csv-load">Use these rows</button>
+            <button class="btn ghost" id="csv-sample">Fill with an example</button>
+          </div>
+        </details>
+
+        <div id="recipients-result" hidden>
+          <div class="counts" id="counts"></div>
+          <div class="table-wrap"><table class="grid" id="recipients-table"></table></div>
+          <div class="next"><a class="btn primary" href="#message">Write the message</a></div>
+        </div>
+      </section>
+
+      <!-- 2 Message -->
+      <section class="view" id="view-message" hidden>
+        <div class="compose">
+          <div class="editor">
+            <h1>Write the message</h1>
+            <label class="field">
+              <span>Subject</span>
+              <input id="subject" type="text" placeholder="Quick update for {{company}}">
+            </label>
+            <label class="field grow">
+              <span>Message</span>
+              <textarea id="body" rows="14" placeholder="Hi {{name}},&#10;&#10;…"></textarea>
+            </label>
+            <div class="fields-bar">
+              <span id="fields-hint">Insert a field:</span>
+              <div class="chips" id="field-chips"></div>
+            </div>
+
+            <fieldset class="claude">
+              <label class="switch">
+                <input type="checkbox" id="personalize">
+                <span class="track" aria-hidden="true"></span>
+                <span>Have Claude tailor each email to its recipient</span>
+              </label>
+              <p class="help">Claude rewrites the greeting and opening using each person's details. It keeps your offer, links and facts as written. This makes one Claude request per email.</p>
+              <label class="field inline" id="effort-wrap">
+                <span>Effort</span>
+                <select id="effort">
+                  <option value="low">Low (fast, cheapest)</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+            </fieldset>
+          </div>
+
+          <aside class="preview-pane" aria-label="Preview">
+            <div class="preview-head">
+              <button class="icon-btn" id="prev" aria-label="Previous recipient"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M9 2 4 7l5 5"/></svg></button>
+              <span id="preview-who">No recipients</span>
+              <button class="icon-btn" id="next" aria-label="Next recipient"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="m5 2 5 5-5 5"/></svg></button>
+            </div>
+            <article class="letter" id="letter">
+              <dl class="letter-meta">
+                <div><dt>From</dt><dd id="pv-from"></dd></div>
+                <div><dt>To</dt><dd id="pv-to"></dd></div>
+                <div><dt>Subject</dt><dd id="pv-subject"></dd></div>
+              </dl>
+              <div class="letter-body" id="pv-body"></div>
+            </article>
+            <div class="preview-foot">
+              <button class="btn ghost" id="pv-claude" hidden>Show Claude's version for this person</button>
+              <p class="note" id="pv-note">Fields fill in from the recipient's row as you type.</p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 3 Send -->
+      <section class="view" id="view-send" hidden>
+        <h1>Send</h1>
+        <div class="send-grid">
+          <div class="send-summary" id="send-summary"></div>
+
+          <div class="send-options">
+            <label class="field">
+              <span>Send a test to yourself first</span>
+              <input id="test-to" type="email" placeholder="you@yourdomain.com" autocomplete="email">
+              <small class="help">When filled in, every message goes to this address instead, and nobody is marked as sent.</small>
+            </label>
+            <label class="field">
+              <span>Only the first</span>
+              <input id="limit" type="number" min="1" placeholder="all" inputmode="numeric">
+            </label>
+            <label class="field">
+              <span>Emails per minute</span>
+              <input id="rate" type="number" min="1" max="600" inputmode="numeric">
+            </label>
+            <div class="send-actions">
+              <button class="btn" id="dry-run">Preview all</button>
+              <button class="btn primary" id="send-btn">Send</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="progress" id="progress" hidden>
+          <div class="progress-head">
+            <div>
+              <h2 id="progress-title"></h2>
+              <p id="progress-sub" class="note"></p>
+            </div>
+            <button class="btn ghost" id="stop-btn">Stop</button>
+          </div>
+          <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="bar"><span></span></div>
+          <ol class="feed" id="feed"></ol>
+        </div>
+      </section>
+
+      <!-- History -->
+      <section class="view" id="view-history" hidden>
+        <h1>Sent log</h1>
+        <p class="lede">Every delivery and failure from real sends, newest first. Test sends aren't recorded. A campaign never emails an address twice.</p>
+        <div class="table-wrap"><table class="grid" id="history-table"></table></div>
+      </section>
+
+      <!-- Unsubscribes -->
+      <section class="view" id="view-unsubscribes" hidden>
+        <h1>Unsubscribes</h1>
+        <p class="lede">These addresses are skipped in every campaign. Add anyone who asks to stop hearing from you, one address per line.</p>
+        <textarea id="suppression" rows="12" spellcheck="false"></textarea>
+        <div class="row-actions"><button class="btn primary" id="save-suppression">Save list</button></div>
+      </section>
+
+      <!-- Settings -->
+      <section class="view" id="view-settings" hidden>
+        <h1>Settings</h1>
+        <form id="settings-form" class="settings" autocomplete="off">
+          <fieldset>
+            <legend>Email server</legend>
+            <p class="help">For Gmail use smtp.gmail.com, port 587 and an App Password (not your normal password).</p>
+            <label class="field"><span>Server</span><input name="SMTP_HOST" placeholder="smtp.gmail.com"></label>
+            <label class="field"><span>Port</span><input name="SMTP_PORT" inputmode="numeric" placeholder="587"></label>
+            <label class="field"><span>Username</span><input name="SMTP_USER"></label>
+            <label class="field"><span>Password</span><input name="SMTP_PASSWORD" type="password" placeholder="Leave blank to keep the saved one"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Sender</legend>
+            <label class="field"><span>Your name</span><input name="SENDER_NAME"></label>
+            <label class="field"><span>From address</span><input name="SENDER_EMAIL" type="email" placeholder="Defaults to the username"></label>
+            <label class="field"><span>Replies go to</span><input name="REPLY_TO" type="email" placeholder="Optional"></label>
+            <label class="field"><span>Unsubscribe link or address</span><input name="UNSUBSCRIBE" placeholder="mailto:you@example.com?subject=unsubscribe"></label>
+            <label class="field"><span>Default emails per minute</span><input name="SEND_RATE_PER_MIN" inputmode="numeric" placeholder="20"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Claude</legend>
+            <label class="field"><span>Anthropic API key</span><input name="ANTHROPIC_API_KEY" type="password" placeholder="Leave blank to keep the saved one"></label>
+            <label class="field"><span>Model</span><input name="CLAUDE_MODEL" placeholder="claude-opus-5-5"></label>
+          </fieldset>
+          <div class="row-actions"><button class="btn primary" type="submit">Save settings</button></div>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="confirm">
+    <form method="dialog">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-body"></p>
+      <div class="row-actions">
+        <button class="btn ghost" value="cancel">Cancel</button>
+        <button class="btn primary" value="ok" id="confirm-ok"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

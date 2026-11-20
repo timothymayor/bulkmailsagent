@@ -1,0 +1,12 @@
+Subject: Quick update for {{company}}
+
+Hi {{name}},
+
+We just launched a new feature that I think the team at {{company}} will find useful.
+
+You can read about it here: https://example.com/launch
+
+Happy to answer any questions - just reply to this email.
+
+Best,
+Your Name

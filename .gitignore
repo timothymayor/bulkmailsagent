@@ -1,0 +1,4 @@
+.env
+outbox/
+sent_log.csv
+__pycache__/
