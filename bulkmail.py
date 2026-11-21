@@ -260,6 +260,12 @@ def build_message(sender_name: str, sender_email: str, to: str, subject: str,
     return msg
 
 
+class MailServerError(Exception):
+    """The mail server can't be used at all (login refused, connection blocked).
+    Every remaining recipient would fail the same way, so the run must stop: retrying
+    logins against a host that has blocked you only extends the block."""
+
+
 class Mailer:
     def __init__(self):
         self.host = env("SMTP_HOST", required=True)
@@ -271,12 +277,26 @@ class Mailer:
 
     def connect(self) -> None:
         ctx = ssl.create_default_context()
-        if self.use_ssl:
-            self.conn = smtplib.SMTP_SSL(self.host, self.port, context=ctx, timeout=30)
-        else:
-            self.conn = smtplib.SMTP(self.host, self.port, timeout=30)
-            self.conn.starttls(context=ctx)
-        self.conn.login(self.user, self.password)
+        try:
+            if self.use_ssl:
+                self.conn = smtplib.SMTP_SSL(self.host, self.port, context=ctx, timeout=30)
+            else:
+                self.conn = smtplib.SMTP(self.host, self.port, timeout=30)
+                self.conn.starttls(context=ctx)
+            self.conn.login(self.user, self.password)
+        except smtplib.SMTPAuthenticationError as e:
+            self.conn = None
+            raise MailServerError(
+                f"The mail server refused the login for {self.user} ({e.smtp_code}). "
+                "Check SMTP_PASSWORD by logging into webmail; if it still works there, ask "
+                "your host whether outgoing mail was suspended for sending too much. "
+                "Sending stopped so repeated logins don't get you locked out.") from e
+        except (smtplib.SMTPException, OSError) as e:
+            self.conn = None
+            raise MailServerError(
+                f"Couldn't connect to {self.host}:{self.port} ({e}). If this follows a big "
+                "send or failed logins, your host's firewall has probably blocked your IP - "
+                "ask them to unblock it. Sending stopped.") from e
 
     def send(self, msg: EmailMessage) -> None:
         for attempt in range(2):
@@ -285,6 +305,10 @@ class Mailer:
                     self.connect()
                 self.conn.send_message(msg)
                 return
+            except smtplib.SMTPSenderRefused as e:  # the account itself is refused
+                raise MailServerError(
+                    f"The mail server refused to send from {e.sender!r} ({e.smtp_code} "
+                    f"{e.smtp_error.decode(errors='replace')}). Sending stopped.") from e
             except (smtplib.SMTPServerDisconnected, ConnectionError, TimeoutError):
                 self.conn = None  # reconnect once, then give up
                 if attempt:
@@ -405,7 +429,7 @@ def main() -> None:
                     (OUTBOX / f"{i:04d}_{safe}.eml").write_bytes(bytes(msg))
                 sent += 1
                 print(f"  [{i}/{len(queue)}] {'sent' if mailer else 'preview'} -> {to}")
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, MailServerError):
                 raise
             except Exception as e:  # keep going; one bad row shouldn't kill the run
                 failed += 1
@@ -417,6 +441,8 @@ def main() -> None:
                 time.sleep(max(0.0, interval - (time.monotonic() - started)))
     except KeyboardInterrupt:
         print("\nInterrupted - rerun the same command to resume where it stopped.")
+    except MailServerError as e:
+        print(f"\nSTOPPED: {e}\nFix the problem, then rerun the same command to resume.")
     finally:
         if mailer:
             mailer.close()

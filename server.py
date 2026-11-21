@@ -103,6 +103,8 @@ def run_job(opts: dict) -> None:
                         bm.log_result(campaign, email, "sent")
                 JOB.add_item({"email": email, "to": to, "status": "sent" if live else "previewed",
                               "subject": msg["Subject"], "body": body})
+            except bm.MailServerError:
+                raise  # server unusable: stop the whole run, don't burn through the list
             except Exception as e:
                 if mailer and not test_to:
                     bm.log_result(campaign, email, bm.failure_status(e), str(e)[:200])
@@ -186,7 +188,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*a, directory=str(STATIC), **kw)
 
     def log_message(self, fmt, *args):  # quieter console
-        if "/api/job" not in (args[0] if args else ""):
+        if "/api/job" not in str(args[0] if args else ""):
             super().log_message(fmt, *args)
 
     def send_json(self, data, code=HTTPStatus.OK):
