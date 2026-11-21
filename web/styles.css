@@ -154,7 +154,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .grid tr.skip td { color: var(--pencil); }
 .tag { font-size: .8125rem; font-weight: 500; }
 .tag.ready, .tag.sent { color: var(--ok); }
-.tag.invalid, .tag.failed { color: var(--air-red); }
+.tag.invalid, .tag.failed, .tag.rejected { color: var(--air-red); }
 .tag.duplicate, .tag.unsubscribed, .tag.already-sent { color: var(--warn); }
 .empty { color: var(--pencil); padding: 2rem; text-align: center; }
 

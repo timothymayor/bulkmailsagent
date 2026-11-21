@@ -136,8 +136,8 @@ function renderRecipients() {
   $("#nav-recipients").textContent = rows.length ? `${ready} ready${skipped ? `, ${skipped} skipped` : ""}` : "None yet";
   document.querySelector('[data-view="recipients"]').parentElement.classList.toggle("done", ready > 0);
 
-  const order = ["ready", "already sent", "unsubscribed", "duplicate", "invalid"];
-  const words = { ready: "ready to send", "already sent": "already sent in this campaign", unsubscribed: "unsubscribed", duplicate: "duplicates", invalid: "invalid addresses" };
+  const order = ["ready", "already sent", "rejected", "unsubscribed", "duplicate", "invalid"];
+  const words = { ready: "ready to send", "already sent": "already sent in this campaign", rejected: "rejected by mail server", unsubscribed: "unsubscribed", duplicate: "duplicates", invalid: "invalid addresses" };
   $("#counts").innerHTML = order.filter((k) => counts[k]).map((k) =>
     `<span class="tag ${k.replace(" ", "-")}"><strong>${counts[k]}</strong>${words[k]}</span>`).join("");
 

@@ -105,7 +105,7 @@ def run_job(opts: dict) -> None:
                               "subject": msg["Subject"], "body": body})
             except Exception as e:
                 if mailer and not test_to:
-                    bm.log_result(campaign, email, "failed", str(e)[:200])
+                    bm.log_result(campaign, email, bm.failure_status(e), str(e)[:200])
                 JOB.add_item({"email": email, "to": to, "status": "failed", "detail": str(e)})
             if mailer and i < len(queue):
                 remaining = interval - (time.monotonic() - started)

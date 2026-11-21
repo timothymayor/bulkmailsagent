@@ -11,6 +11,11 @@ Usage:
     python bulkmail.py recipients.csv template.txt --personalize # dry run + Claude
     python bulkmail.py recipients.csv template.txt --send --limit 3 --test-to me@example.com
     python bulkmail.py recipients.csv template.txt --send        # real send
+    python bulkmail.py recipients.csv template.txt --send --limit 200   # next 200 not yet emailed
+    python bulkmail.py recipients.csv template.txt --send --batch-size 200 --batch-pause 60
+
+Re-running the same command (same campaign) skips anyone already emailed, so --limit
+sends the list in batches. Addresses the mail server permanently rejects are skipped too.
 """
 
 from __future__ import annotations
@@ -34,7 +39,8 @@ SENT_LOG = HERE / "sent_log.csv"
 SUPPRESSION_FILE = HERE / "unsubscribed.txt"
 OUTBOX = HERE / "outbox"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+# {{field}} or {{field|fallback}} - the fallback is used when the field is empty.
+PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*(?:\|([^}]*))?\}\}")
 
 
 # ---------------------------------------------------------------- config
@@ -95,9 +101,10 @@ def load_recipients(path: Path) -> list[dict[str, str]]:
 
 
 def classify(rows: list[dict[str, str]], campaign: str) -> list[tuple[dict[str, str], str]]:
-    """Tag each row: ready, invalid, duplicate, unsubscribed, or already sent."""
+    """Tag each row: ready, invalid, duplicate, unsubscribed, already sent, or rejected."""
     suppressed = read_lines(SUPPRESSION_FILE)
     done = already_sent(campaign)
+    rejected = logged(campaign, "rejected") - done
     seen: set[str] = set()
     out = []
     for row in rows:
@@ -110,6 +117,8 @@ def classify(rows: list[dict[str, str]], campaign: str) -> list[tuple[dict[str, 
             status = "unsubscribed"
         elif email in done:
             status = "already sent"
+        elif email in rejected:
+            status = "rejected"
         else:
             seen.add(email)
             status = "ready"
@@ -127,8 +136,12 @@ def load_template(path: Path) -> tuple[str, str]:
 
 
 def render(template: str, row: dict[str, str]) -> str:
-    """Replace {{field}} with the row's value. Unknown fields become ''."""
-    return PLACEHOLDER_RE.sub(lambda m: row.get(m.group(1).lower(), ""), template)
+    """Replace {{field}} with the row's value, or {{field|fallback}} with the fallback
+    when the value is empty. Unknown fields without a fallback become ''."""
+    def fill(m: re.Match) -> str:
+        value = row.get(m.group(1).lower(), "").strip()
+        return value or (m.group(2) or "").strip()
+    return PLACEHOLDER_RE.sub(fill, template)
 
 
 def read_lines(path: Path) -> set[str]:
@@ -137,12 +150,28 @@ def read_lines(path: Path) -> set[str]:
     return {l.strip().lower() for l in path.read_text(encoding="utf-8").splitlines() if l.strip()}
 
 
-def already_sent(campaign: str) -> set[str]:
+def logged(campaign: str, status: str) -> set[str]:
+    """Addresses logged with this status in this campaign."""
     if not SENT_LOG.exists():
         return set()
     with SENT_LOG.open(newline="", encoding="utf-8") as f:
         return {r["email"].lower() for r in csv.DictReader(f)
-                if r.get("campaign") == campaign and r.get("status") == "sent"}
+                if r.get("campaign") == campaign and r.get("status") == status}
+
+
+def already_sent(campaign: str) -> set[str]:
+    return logged(campaign, "sent")
+
+
+def failure_status(error: Exception) -> str:
+    """'rejected' when the mail server permanently refused the address (5xx), so later
+    batches skip it; 'failed' for temporary problems, which are retried on the next run."""
+    if isinstance(error, smtplib.SMTPRecipientsRefused):
+        codes = [code for code, _ in error.recipients.values()]
+        return "rejected" if codes and all(c >= 500 for c in codes) else "failed"
+    if isinstance(error, smtplib.SMTPDataError) and error.smtp_code >= 550:
+        return "rejected"
+    return "failed"
 
 
 def log_result(campaign: str, email: str, status: str, detail: str = "") -> None:
@@ -281,7 +310,13 @@ def main() -> None:
     p.add_argument("--campaign", help="Campaign name for resume tracking (default: template filename)")
     p.add_argument("--rate", type=float, default=rate_setting(),
                    help=f"Max emails per minute (default: SEND_RATE_PER_MIN, else {DEFAULT_RATE:g})")
-    p.add_argument("--limit", type=int, help="Only process the first N eligible recipients")
+    p.add_argument("--limit", type=int,
+                   help="Only process the next N recipients not yet emailed in this campaign. "
+                        "Rerun the same command to send the next batch.")
+    p.add_argument("--batch-size", type=int,
+                   help="Send in batches of N within one run, pausing between batches")
+    p.add_argument("--batch-pause", type=float, default=60.0,
+                   help="Minutes to wait between batches (default 60, for hourly host limits)")
     p.add_argument("--test-to", help="Send every message to this address instead (for testing)")
     p.add_argument("--model", default=env("CLAUDE_MODEL", "claude-opus-5-5"))
     p.add_argument("--effort", default="low", choices=["low", "medium", "high", "xhigh", "max"])
@@ -292,21 +327,37 @@ def main() -> None:
     subject_tpl, body_tpl = load_template(args.template)
     rows = load_recipients(args.recipients)
 
-    queue, skipped = [], {"invalid": 0, "duplicate": 0, "unsubscribed": 0, "already sent": 0}
+    if args.limit is not None and args.limit < 1:
+        sys.exit("--limit must be 1 or more")
+    if args.batch_size is not None and args.batch_size < 1:
+        sys.exit("--batch-size must be 1 or more")
+    if args.batch_pause < 0:
+        sys.exit("--batch-pause can't be negative")
+
+    queue, skipped = [], {"invalid": 0, "duplicate": 0, "unsubscribed": 0,
+                          "already sent": 0, "rejected": 0}
     for row, status in classify(rows, campaign):
         if status == "ready":
             queue.append(row)
         else:
             skipped[status] += 1
+    remaining_before = len(queue)
     if args.limit:
         queue = queue[: args.limit]
+    batch_size = args.batch_size or len(queue) or 1
+    batches = -(-len(queue) // batch_size)
 
     mode = "SEND" if args.send else "DRY RUN"
-    print(f"[{mode}] campaign={campaign!r}: {len(queue)} to process, "
+    print(f"[{mode}] campaign={campaign!r}: {len(queue)} to process this run "
+          f"({remaining_before} not yet emailed), "
           + (", ".join(f"{v} skipped ({k})" for k, v in skipped.items() if v) or "none skipped"))
     if args.test_to:
         print(f"  All messages redirected to {args.test_to}")
+    if args.send and batches > 1:
+        print(f"  {batches} batches of up to {batch_size}, {args.batch_pause:g} min apart")
     if not queue:
+        if remaining_before == 0 and skipped["already sent"]:
+            print("  Everyone in this list has already been emailed in this campaign.")
         return
 
     if args.send and not args.yes:
@@ -326,6 +377,14 @@ def main() -> None:
     sent = failed = 0
     try:
         for i, row in enumerate(queue, 1):
+            if mailer and i > 1 and (i - 1) % batch_size == 0:
+                batch_no = (i - 1) // batch_size
+                mailer.close()
+                mailer.conn = None  # reconnect fresh for the next batch
+                resume_at = dt.datetime.now() + dt.timedelta(minutes=args.batch_pause)
+                print(f"  Batch {batch_no}/{batches} done. Next batch at "
+                      f"{resume_at:%H:%M} (Ctrl+C to stop; rerun later to resume).")
+                time.sleep(args.batch_pause * 60)
             started = time.monotonic()
             email = row["email"]
             try:
@@ -350,10 +409,11 @@ def main() -> None:
                 raise
             except Exception as e:  # keep going; one bad row shouldn't kill the run
                 failed += 1
+                status = failure_status(e)
                 if mailer and not args.test_to:
-                    log_result(campaign, email, "failed", str(e)[:200])
-                print(f"  [{i}/{len(queue)}] FAILED {email}: {e}")
-            if mailer and i < len(queue):
+                    log_result(campaign, email, status, str(e)[:200])
+                print(f"  [{i}/{len(queue)}] {status.upper()} {email}: {e}")
+            if mailer and i < len(queue) and i % batch_size:
                 time.sleep(max(0.0, interval - (time.monotonic() - started)))
     except KeyboardInterrupt:
         print("\nInterrupted - rerun the same command to resume where it stopped.")
@@ -364,6 +424,13 @@ def main() -> None:
     print(f"Done: {sent} {'sent' if mailer else 'previewed'}, {failed} failed.")
     if not args.send:
         print(f"Previews in {OUTBOX}. Add --send to deliver.")
+    elif not args.test_to:
+        total_sent = len(already_sent(campaign))
+        left = sum(1 for _, s in classify(rows, campaign) if s == "ready")
+        print(f"Campaign {campaign!r}: {total_sent} sent so far, {left} still to email.")
+        if left:
+            print("  Run the same command again to send the next batch - "
+                  "people already emailed are skipped.")
 
 
 if __name__ == "__main__":
