@@ -64,6 +64,22 @@ RECIPIENTS: list[dict[str, str]] = []
 
 
 def run_job(opts: dict) -> None:
+    lock = None
+    if opts["send"] and not opts.get("test_to"):
+        try:
+            lock = bm.CampaignLock(opts["campaign"])
+        except bm.CampaignBusy as e:
+            JOB.update(status="error", campaign=opts["campaign"], live=True, test_to="",
+                       total=0, done=0, failed=0, items=[], error=str(e), started=time.time())
+            return
+    try:
+        _run_job(opts)
+    finally:
+        if lock:
+            lock.release()
+
+
+def _run_job(opts: dict) -> None:
     campaign = opts["campaign"]
     live = opts["send"]
     test_to = opts.get("test_to") or ""

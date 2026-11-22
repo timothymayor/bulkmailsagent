@@ -27,6 +27,7 @@ import io
 import os
 import re
 import smtplib
+import socket
 import ssl
 import sys
 import time
@@ -38,6 +39,7 @@ HERE = Path(__file__).parent
 SENT_LOG = HERE / "sent_log.csv"
 SUPPRESSION_FILE = HERE / "unsubscribed.txt"
 OUTBOX = HERE / "outbox"
+LOCK_DIR = HERE / "locks"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # {{field}} or {{field|fallback}} - the fallback is used when the field is empty.
 PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*(?:\|([^}]*))?\}\}")
@@ -260,6 +262,52 @@ def build_message(sender_name: str, sender_email: str, to: str, subject: str,
     return msg
 
 
+class CampaignBusy(Exception):
+    """Another send for the same campaign is already running."""
+
+
+class CampaignLock:
+    """Only one live send per campaign at a time (CLI, scheduled task or web UI).
+
+    Two senders working on one campaign both pick the same "next people not yet
+    emailed" and send them the message twice. The lock is an OS file lock, so it is
+    released automatically if the process crashes or the PC restarts."""
+
+    def __init__(self, campaign: str):
+        LOCK_DIR.mkdir(exist_ok=True)
+        path = LOCK_DIR / (re.sub(r"[^\w.-]", "_", campaign) + ".lock")
+        self.file = open(path, "a+")
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self.file.seek(0)
+                msvcrt.locking(self.file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.file.close()
+            raise CampaignBusy(
+                f"Campaign {campaign!r} is already being sent (by the web app, the hourly "
+                "task or another window). Wait for it to finish, then try again - "
+                "running both would email some people twice.") from None
+
+    def release(self) -> None:
+        if self.file.closed:
+            return
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self.file.seek(0)
+                msvcrt.locking(self.file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.file, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        self.file.close()
+
+
 class MailServerError(Exception):
     """The mail server can't be used at all (login refused, connection blocked).
     Every remaining recipient would fail the same way, so the run must stop: retrying
@@ -291,12 +339,19 @@ class Mailer:
                 "Check SMTP_PASSWORD by logging into webmail; if it still works there, ask "
                 "your host whether outgoing mail was suspended for sending too much. "
                 "Sending stopped so repeated logins don't get you locked out.") from e
+        except socket.gaierror as e:  # name lookup failed: no internet, not the host
+            self.conn = None
+            raise MailServerError(
+                f"Couldn't find {self.host} - this PC seems to be offline or its internet "
+                "connection dropped. Check the connection, then run again to carry on. "
+                "Sending stopped.") from e
         except (smtplib.SMTPException, OSError) as e:
             self.conn = None
             raise MailServerError(
-                f"Couldn't connect to {self.host}:{self.port} ({e}). If this follows a big "
-                "send or failed logins, your host's firewall has probably blocked your IP - "
-                "ask them to unblock it. Sending stopped.") from e
+                f"Couldn't connect to {self.host}:{self.port} ({e}). Either the internet "
+                "connection is unstable, or - if this keeps happening after a big send - "
+                "your host is limiting or blocking your IP; ask them to check. "
+                "Sending stopped.") from e
 
     def send(self, msg: EmailMessage) -> None:
         for attempt in range(2):
@@ -360,6 +415,11 @@ def main() -> None:
 
     queue, skipped = [], {"invalid": 0, "duplicate": 0, "unsubscribed": 0,
                           "already sent": 0, "rejected": 0}
+    if args.send and not args.test_to:
+        try:  # held until the program exits; stops a second sender double-emailing
+            _lock = CampaignLock(campaign)  # noqa: F841
+        except CampaignBusy as e:
+            sys.exit(f"STOPPED: {e}")
     for row, status in classify(rows, campaign):
         if status == "ready":
             queue.append(row)
