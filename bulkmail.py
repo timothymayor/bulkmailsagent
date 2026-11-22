@@ -36,10 +36,13 @@ from email.utils import formataddr, make_msgid
 from pathlib import Path
 
 HERE = Path(__file__).parent
-SENT_LOG = HERE / "sent_log.csv"
-SUPPRESSION_FILE = HERE / "unsubscribed.txt"
-OUTBOX = HERE / "outbox"
-LOCK_DIR = HERE / "locks"
+# Where settings and run data live: the app folder by default, /data in Docker.
+DATA_DIR = Path(os.environ.get("BULKMAIL_DATA_DIR") or HERE)
+ENV_FILE = DATA_DIR / ".env"
+SENT_LOG = DATA_DIR / "sent_log.csv"
+SUPPRESSION_FILE = DATA_DIR / "unsubscribed.txt"
+OUTBOX = DATA_DIR / "outbox"
+LOCK_DIR = DATA_DIR / "locks"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # {{field}} or {{field|fallback}} - the fallback is used when the field is empty.
 PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*(?:\|([^}]*))?\}\}")
@@ -47,7 +50,7 @@ PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*(?:\|([^}]*))?\}\}")
 
 # ---------------------------------------------------------------- config
 
-def load_dotenv(path: Path = HERE / ".env") -> None:
+def load_dotenv(path: Path = ENV_FILE) -> None:
     """Minimal .env loader (KEY=VALUE lines). Real env vars take precedence."""
     if not path.exists():
         return
@@ -158,7 +161,7 @@ def logged(campaign: str, status: str) -> set[str]:
         return set()
     with SENT_LOG.open(newline="", encoding="utf-8") as f:
         return {r["email"].lower() for r in csv.DictReader(f)
-                if r.get("campaign") == campaign and r.get("status") == status}
+                if r.get("campaign") == campaign and r.get("status") == status and r.get("email")}
 
 
 def already_sent(campaign: str) -> set[str]:

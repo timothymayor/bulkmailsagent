@@ -119,6 +119,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--f
 .btn.ghost { border-color: transparent; background: transparent; color: var(--air-blue); padding-inline: .5rem; }
 .btn.ghost:hover { background: color-mix(in srgb, var(--air-blue) 10%, transparent); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.busy { opacity: .6; cursor: progress; pointer-events: none; }
 .icon-btn { flex: none; display: grid; place-items: center; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); cursor: pointer; }
 .icon-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .icon-btn:not(:disabled):hover { border-color: var(--ink); }

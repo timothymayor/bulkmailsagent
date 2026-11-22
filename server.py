@@ -2,7 +2,8 @@
 
     python server.py            # then open http://127.0.0.1:8025
 
-Listens on localhost only. Uses the same .env, sent_log.csv and
+Listens on localhost only (BULKMAIL_HOST=0.0.0.0 inside Docker, where the port
+is published to the host's localhost only). Uses the same .env, sent_log.csv and
 unsubscribed.txt as the command-line tool.
 """
 
@@ -22,8 +23,9 @@ import bulkmail as bm
 import report
 
 PORT = int(os.environ.get("BULKMAIL_PORT", "8025"))
+HOST = os.environ.get("BULKMAIL_HOST", "127.0.0.1")
 STATIC = bm.HERE / "web"
-ENV_FILE = bm.HERE / ".env"
+ENV_FILE = bm.ENV_FILE
 SETTING_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SENDER_NAME",
                 "SENDER_EMAIL", "REPLY_TO", "UNSUBSCRIBE", "SEND_RATE_PER_MIN",
                 "ANTHROPIC_API_KEY", "CLAUDE_MODEL"]
@@ -351,7 +353,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main():
     bm.load_dotenv()
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Bulk email UI running at http://127.0.0.1:{PORT}  (Ctrl+C to stop)")
     try:
         server.serve_forever()

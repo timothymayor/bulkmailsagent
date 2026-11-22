@@ -365,6 +365,37 @@ function updateReportLinks() {
   $("#report-docx").href = `/api/report?format=docx${q}`;
 }
 
+// Reports take a while to build for big lists, so fetch them here: show progress on the
+// button, and show the server's error instead of a download that silently does nothing.
+async function downloadReport(ev) {
+  ev.preventDefault();
+  const link = ev.currentTarget;
+  if (link.classList.contains("busy")) return;
+  const label = link.textContent;
+  link.classList.add("busy");
+  link.textContent = "Preparing report…";
+  try {
+    const res = await fetch(link.href);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Server returned ${res.status}`);
+    }
+    const name = (res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/)?.[1] || "report";
+    const url = URL.createObjectURL(await res.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    toast(`Downloaded ${name}`);
+  } catch (e) {
+    toast(`Report download failed: ${e.message}`, true);
+  } finally {
+    link.classList.remove("busy");
+    link.textContent = label;
+  }
+}
+
 async function loadCampaigns() {
   const sel = $("#report-campaign");
   const current = sel.value;
@@ -453,6 +484,7 @@ function init() {
   $("#send-btn").addEventListener("click", () => startRun(true));
   $("#stop-btn").addEventListener("click", () => api("/api/job/stop", {}).catch((e) => toast(e.message, true)));
   $("#report-campaign").addEventListener("change", updateReportLinks);
+  for (const id of ["#report-pdf", "#report-docx"]) $(id).addEventListener("click", downloadReport);
   $("#save-suppression").addEventListener("click", saveSuppression);
   $("#settings-form").addEventListener("submit", saveSettings);
 

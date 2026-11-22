@@ -1,0 +1,14 @@
+services:
+  bulkmail:
+    build: .
+    image: bulkmailsagent
+    container_name: bulkmailsagent
+    restart: unless-stopped
+    # The web UI has no login, so publish it on this computer's localhost only.
+    # Never change this to "8025:8025" - that would let anyone on your network send as you.
+    ports:
+      - "127.0.0.1:8025:8025"
+    # The project folder holds .env, templates/, sent_log.csv, unsubscribed.txt,
+    # reports/ and logs - shared with the local (non-Docker) app, so history carries over.
+    volumes:
+      - .:/data

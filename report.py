@@ -64,15 +64,19 @@ def load_campaigns(campaign: str | None = None, log: Path | None = None) -> list
     out: dict[str, Campaign] = {}
     with log.open(newline="", encoding="utf-8") as f:
         for r in csv.DictReader(f):
-            name = r.get("campaign", "")
+            # Skip damaged lines (e.g. a half-written row) instead of failing the report.
+            email = (r.get("email") or "").strip().lower()
+            ts = r.get("timestamp") or ""
+            if not email or not r.get("status") or not ts[:4].isdigit():
+                continue
+            name = r.get("campaign") or ""
             if campaign and name != campaign:
                 continue
             c = out.setdefault(name, Campaign(name))
-            ts = r.get("timestamp", "")
             c.first = min(c.first or ts, ts)
             c.last = max(c.last, ts)
             c.attempts += 1
-            c.results[r.get("email", "").lower()] = (ts, r.get("status", ""), r.get("detail", ""))
+            c.results[email] = (ts, r["status"], r.get("detail") or "")
     return sorted(out.values(), key=lambda c: c.last, reverse=True)
 
 
@@ -330,7 +334,7 @@ def main() -> None:
         data, name = build(args.format, args.campaign, args.log)
     except ValueError as e:
         raise SystemExit(str(e))
-    out = args.output or (bm.HERE / "reports" / name)
+    out = args.output or (bm.DATA_DIR / "reports" / name)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(data)
     print(f"Report written to {out}")

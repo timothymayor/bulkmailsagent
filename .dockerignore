@@ -1,0 +1,21 @@
+# Secrets and run data never go into the image; they are mounted at /data instead.
+.env
+sent_log.csv
+unsubscribed.txt
+templates/
+outbox/
+reports/
+logs/
+locks/
+*.csv
+*.xlsx
+*.docx
+*.pdf
+
+# Tooling
+.git/
+.gitignore
+.vscode/
+__pycache__/
+*.pyc
+scheduled_send.cmd
